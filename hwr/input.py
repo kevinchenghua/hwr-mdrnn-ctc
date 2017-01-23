@@ -30,20 +30,17 @@ def inputs(alignment_file, data_dir, num_epochs=None):
     # read the alignment file
     image_list, label_list = read_labeled_image_list(alignment_file, data_dir)
 
-    images = tf.convert_to_tensor(image_list, dtype=tf.string)
-    labels = tf.convert_to_tensor(label_list, dtype=tf.string)
+    images = tf.convert_to_tensor(image_list, dtype=tf.string, name='images')
+    labels = tf.convert_to_tensor(label_list, dtype=tf.string, name='labels')
 
     # create input queue
     input_queue = tf.train.slice_input_producer([images, labels],
                                                 num_epochs=num_epochs,
-                                                shuffle=True)
+                                                shuffle=True,
+                                                name='input_queue')
 
     # read image and label from input_queue
     image, label = read_images_and_labels_from_disk(input_queue)
-
-    # create summary op
-    tensor_name = image.op.name
-    tf.image_summary(tensor_name + 'images', image)
 
     return image, label
 
@@ -91,6 +88,30 @@ def read_images_and_labels_from_disk(input_queue):
     return example, label
 
 
+def test_inputs():
+    sess = tf.Session()
+    with sess.as_default():
+        with tf.name_scope('inputs'):
+            _, label = inputs('alignment.txt', '../data/')
+        init_op = tf.initialize_all_variables()
+
+        merged = tf.summary.merge_all()
+        summary_writer = tf.summary.FileWriter('../log/unit_test/', sess.graph)
+
+        sess.run(init_op)
+        coord = tf.train.Coordinator()
+        threads = tf.train.start_queue_runners(sess=sess, coord=coord)
+
+        print(label.eval())
+        summary = sess.run(merged)
+        summary_writer.add_summary(summary, 1)
+
+        coord.request_stop()
+        coord.join(threads)
+
+        sess.close()
+
+
 def test():
 
     # test function read_labeled_image_list
@@ -101,21 +122,7 @@ def test():
         image_files[0]))
 
     # test inputs
-    _, label = inputs('alignment.txt', '../data/')
-
-    init_op = tf.initialize_all_variables()
-    sess = tf.Session()
-    with sess.as_default():
-        sess.run(init_op)
-        coord = tf.train.Coordinator()
-        threads = tf.train.start_queue_runners(sess=sess, coord=coord)
-
-        print(label.eval())
-
-        coord.request_stop()
-        coord.join(threads)
-
-        sess.close()
+    test_inputs()
 
 
 test()
