@@ -2,6 +2,9 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import time
+import numpy as np
+
 import tensorflow as tf
 from tensorflow.contrib import grid_rnn
 
@@ -147,14 +150,54 @@ def _scan_grid_raw(cell, raw_input, prev_raw_states, init_col_state):
     return output, raw_states
 
 
-def test():
-    input = tf.zeros([100, 150, 1, 3])
-    raw = tf.zeros([150, 1, 100])
-    col = tf.zeros([100, 1, 100])
+def test_scan():
+    # ------------------------------ build graph ------------------------------
+
+    input_h = tf.placeholder(tf.float32, [None, None, 1, 200])
+    raw_h = tf.placeholder(tf.float32, [None, 1, 100])
+    col_h = tf.placeholder(tf.float32, [None, 1, 100])
     gl = grid_rnn.Grid3LSTMCell(50, non_recurrent_fn=tf.nn.relu)
-    # The initializer is needed
-    with  tf.variable_scope("test", initializer=tf.random_normal_initializer()):
-        output = _scan_grid(gl, input, raw, col)
+
+    # build forward computation, the initializer is needed
+    with tf.variable_scope("test",
+                           initializer=tf.random_normal_initializer()):
+        # cpu is faster
+        with tf.device('/cpu:0'):
+            output = _scan_grid(gl, input_h, raw_h, col_h)
+
+    # build backward computation, cpu is faster
+    with tf.device('/cpu:0'):
+        t = time.time()
+        train_step = tf.train.GradientDescentOptimizer(0.5).minimize(
+            tf.reduce_mean(output))
+        print("backward building time:" + str(time.time() - t))
+
+    # varables initializer
+    init_op = tf.global_variables_initializer()
+
+    # --------------------------- run session -------------------------------
+
+    sess = tf.Session()
+    sess.run(init_op)
+
+    # input
+    input = np.zeros([33, 500, 1, 200])
+    raw = np.zeros([500, 1, 100])
+    col = np.zeros([33, 1, 100])
+
+    # forward computation test
+    t = time.time()
+    sess.run(output, feed_dict={input_h: input, raw_h: raw, col_h: col})
+    print("forward computation time:" + str(time.time() - t))
+
+    # backward computation test
+    t = time.time()
+    sess.run(train_step, feed_dict={input_h: input, raw_h: raw, col_h: col})
+    print("backward computation time:" + str(time.time() - t))
+
+
+def test():
+    test_scan()
 
 
 test()
