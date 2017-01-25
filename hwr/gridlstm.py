@@ -9,6 +9,119 @@ import tensorflow as tf
 from tensorflow.contrib import grid_rnn
 
 
+class GridLSTM4DLayer():
+    """2D Grid LSTM layer with 4 direction scan:
+        top-left -> bottom-right
+        bottom-right -> top-left
+        top-right -> bottom-left
+        bottom-left -> top-right
+    """
+    def __init__(self,
+                 input_size,
+                 output_size,
+                 output_active_fn=None):
+        """Initialize the parameters of GridLSTMLayer
+
+        Args:
+            input_size: int, the number of input feature/channel size
+            output_size: int, the number of output feature/channel size
+            output_active_fn: a tensorflow Op that will be the transfer
+                function of the output, default to be `tensorflow.nn.relu`
+        """
+        self.input_size = input_size
+        self.output_size = output_size
+        self.output_active_fn = output_active_fn \
+            if output_active_fn is not None else tf.nn.relu
+    def __call__(self,
+                 input,
+                 collapse=True,
+                 initializer=tf.random_normal_initializer(),
+                 scope=None):
+        """Build the computation graph of GridLSTM4DLayer
+
+        Args:
+            input: input Tensor, 4D,
+                   num_raws x num_cols x batch_size x input_size
+            initializer: tensorflow variables initializer for cell parameters
+            collapse: bool, whether to collapse 4 GridLSTMLayr to the output
+                      feaure or stack to the new axis
+            scope: VariableScope for the created sub graph,
+                   defaults to "GridLSTMLayer"
+
+        Returns:
+            output: output Tensor, 4D or 5D,
+                if the `collapse` is True, output shape:
+                    num_raws x num_cols x batch_size x (4 * output_size)
+                if the `collapse` is False, output shape:
+                    4 x num_raws x num_cols x batch_size x output_size
+        """
+
+        # check the input tensor
+        assert(len(input.get_shape().as_list()) == 4)
+        assert(input.get_shape().as_list()[2] == 1)
+        assert(input.get_shape().as_list()[3] == self.input_size)
+
+        # create 4 GridLSTMLayer for 4 direction
+        top_left_layer = GridLSTMLayer(
+            self.input_size, self.output_size, self.output_active_fn)
+        top_right_layer = GridLSTMLayer(
+            self.input_size, self.output_size, self.output_active_fn)
+        bottom_left_layer = GridLSTMLayer(
+            self.input_size, self.output_size, self.output_active_fn)
+        bottom_right_layer = GridLSTMLayer(
+            self.input_size, self.output_size, self.output_active_fn)
+
+        # build the computation graph
+        with tf.variable_scope(scope or type(self).__name__):
+            
+            # GridLSTMLayer scan from top-left to bottom-right
+            with tf.variable_scope("top-left"):
+                input_top_left = input
+                output_top_left = top_left_layer(
+                    input_top_left, initializer)
+
+            # GridLSTMLayer scan from top-right to bottom-left
+            with tf.variable_scope("top-right"):
+                input_top_right = tf.reverse(
+                    input, [False, True, False, False])
+                output_top_right = top_right_layer(
+                    input_top_right, initializer)
+                output_top_right = tf.reverse(
+                    output_top_right, [False, True, False, False])
+
+            # GridLSTMLayer scan from bottom-left to top-right
+            with tf.variable_scope("bottom-left"):
+                input_bottom_left = tf.reverse(
+                    input, [True, False, False, False])
+                output_bottom_left = bottom_left_layer(
+                    input_bottom_left, initializer)
+                output_bottom_left = tf.reverse(
+                    output_bottom_left, [True, False, False, False])
+            
+            # GridLSTMLayer scan from bottom-right to top-left
+            with tf.variable_scope("bottom-right"):
+                input_bottom_right = tf.reverse(
+                    input, [True, True, False, False])
+                output_bottom_right = bottom_right_layer(
+                    input_bottom_right, initializer)
+                output_bottom_right = tf.reverse(
+                    output_bottom_right, [True, True, False, False])
+
+            if collapse:
+                # collapse 4 GridLSTMLayer to the fourth dimension
+                output = tf.concat(3, [output_top_left,
+                                       output_top_right,
+                                       output_bottom_left,
+                                       output_bottom_right])
+            else:
+                # collect 4 GridLSTMLayer and stack to the first dimension
+                output = tf.stack([output_top_left,
+                                   output_top_right,
+                                   output_bottom_left,
+                                   output_bottom_right])
+
+        return output
+
 class GridLSTMLayer():
     """2D Grid LSTM layer scan from top-left to bottom-left
 
@@ -297,8 +410,36 @@ def test_layer():
     print("forward computation time:" + str(time.time() - t))
 
 
+def test_4Dlayer():
+    # ------------------------------ build graph ------------------------------
+
+    sess = tf.Session()
+
+    # build forward computation
+    layer = GridLSTM4DLayer(200, 50)
+    input_h = tf.placeholder(tf.float32, [None, None, 1, 200])
+    output = layer(input_h, collapse=False)
+
+    # varables initializer
+    init_op = tf.global_variables_initializer()
+    tf.summary.FileWriter('../log/unit_test/gridlstm/', sess.graph)
+
+    # --------------------------- run session -------------------------------
+
+    sess.run(init_op)
+
+    # input
+    input = np.zeros([33, 500, 1, 200])
+
+    # forward computation test
+    t = time.time()
+    result = sess.run(output, feed_dict={input_h: input})
+    print("forward computation time:" + str(time.time() - t))
+    print("output shape:"+str(result.shape))
+
+
 def test():
-    test_layer()
+    test_4Dlayer()
 
 
 test()
