@@ -25,6 +25,8 @@ def inputs(alignment_file, data_dir, num_epochs=None):
         data_dir: the path to the data directory
 
     Returns:
+        image: image tensor, 3D, num_raws x num_cols x cnm_channels
+        label: string tensor
     """
 
     # read the alignment file
@@ -79,12 +81,12 @@ def read_images_and_labels_from_disk(input_queue):
         input_queue [tensor, tensor]: a list of image and label tensor
 
     Returns:
-        example: image tensor
+        example: image tensor, 3D, num_raws x num_cols x cnm_channels
         label: string tensor
     """
     label = input_queue[1]
     file_contents = tf.read_file(input_queue[0])
-    example = tf.image.decode_png(file_contents)
+    example = tf.to_float(tf.image.decode_png(file_contents, 1))
     return example, label
 
 
@@ -125,4 +127,4 @@ def test():
     test_inputs()
 
 
-test()
+# test()
