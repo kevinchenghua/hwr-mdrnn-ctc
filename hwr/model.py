@@ -26,10 +26,11 @@ class Model():
         patch_1
     """
 
-    def __init__(self, input_size, output_size, window_shape):
+    def __init__(self, num_class, input_size, output_size, window_shape):
         """Initialize the parameters of the model
 
         Args:
+            num_class: int, the number of target class
             input_size: int, the size of input image channel
             output_size: list of int, indicate the output_size for each
                          direction of GridLSTM4DLayer
@@ -38,23 +39,58 @@ class Model():
         """
 
         self.layers = self._parse_conf(input_size, output_size, window_shape)
+        self.num_class = num_class
 
-    def __call__(self, input):
+    def __call__(self, input_tensor):
         """Build the computation graph of the model
 
         Args:
-            input: input tensor, 3D, num_raws x num_cols x input_size
+            input_tensor: input tensor, 3D, num_raws x num_cols x input_size
         Returns:
-            layers_output: list of layer output 3D tensor,
-                           num_raws x num_cols x (4*output_size)
+            layers_output: list of layer output 4D tensor, num_raws x
+                           num_cols x (batch_size: 1) x (4*output_size)
+            output: sequence of the target 3D tensor, num_cols x
+                           (batch_size: 1) x num_class
+            decoded: CTC decoded string tensor 0D
+            log_prob: log probability of output, 0D float tensor
         """
+        # build grid lstm layers
         layers_output = []
         for i in range(len(self.layers)):
             with tf.variable_scope("GridLSTM_" + str(i + 1)):
-                output = self.layers[i].build(input)
-                layers_output.append(tf.squeeze(output, axis=[2]))
-                input = output
-        return layers_output
+                output = self.layers[i].build(input_tensor)
+                layers_output.append(output)
+                input_tensor = output
+
+        # build ctc layer
+        with tf.variable_scope("CTC_layer"):
+            # linear project with log softmax
+            input_tensor = tf.reduce_mean(output, axis=0)
+            w = tf.get_variable(
+                "linear_weight",
+                [self.layers[-1].grid_output_size, self.num_class],
+                initializer=tf.random_normal_initializer(stddev=0.02))
+            b = tf.get_variable(
+                "linear_bias",
+                [self.num_class],
+                initializer=tf.constant_initializer())
+            output = tf.add(tf.matmul(tf.squeeze(input_tensor, [1]), w), b)
+            output = tf.nn.log_softmax(tf.expand_dims(output, 1))
+            # decode with ctc
+            decoded, log_prob = tf.nn.ctc_greedy_decoder(
+                output, [tf.shape(output)[0]])
+            # map the index back to the string
+            table = input.create_lookup_table(input.index_to_character_dict)
+            table.init.run()
+            decoded = tf.reduce_join(
+                tf.sparse_tensor_to_dense(
+                    table.lookup(decoded[0]),
+                    default_value='UNK'),
+                1)
+            decoded = tf.squeeze(decoded, [0])
+            log_prob = tf.squeeze(log_prob, [0, 1])
+
+        return layers_output, output, decoded, log_prob
 
     def _parse_conf(self, input_size, output_size, window_shape):
         """This method parse the argument of __init__ and create layers
@@ -134,23 +170,23 @@ class Model():
             self.grid_output_size = output_size * 4
             self.first_layer = first_layer
 
-        def build(self, input):
+        def build(self, input_tensor):
             """This method build the computation graph of the layer
 
             Args:
-                input: input Tensor, 3D or 4D,
+                input_tensor: input_tensor Tensor, 3D or 4D,
                     if `self.first_layer` is True, 3D, with shape:
                         num_raws x num_cols x input_size,
                     if `self.first_layer` is False, 4D with shape:
-                        num_raws x num_cols x batch_size x input_size
+                        num_raws x num_cols x (batch_size: 1) x input_size
             Returns:
                 grid_lstm_output: output Tensor, 4D,
-                    num_raws x num_cols x batch_size x (4 * output_size)
+                    num_raws x num_cols x (batch_size: 1) x (4 * output_size)
             """
             if self.first_layer:
-                grid_lstm_input = tf.expand_dims(input, 0)
+                grid_lstm_input = tf.expand_dims(input_tensor, 0)
             else:
-                grid_lstm_input = tf.transpose(input, [2, 0, 1, 3])
+                grid_lstm_input = tf.transpose(input_tensor, [2, 0, 1, 3])
             grid_lstm_input = tf.extract_image_patches(grid_lstm_input,
                                                        ksizes=self.ksizes,
                                                        strides=self.strides,
@@ -166,24 +202,25 @@ class Model():
 
 
 def test():
-    model = Model(1, [2, 10, 50], [(4, 3), (4, 3), (4, 3)])
-    with tf.variable_scope("inputs"):
-        image, label = input.inputs("alignment.txt", "../data/")
-    layers_output = model(image)
-
-    init_op = tf.global_variables_initializer()
-
     sess = tf.Session()
+    with sess.as_default():
+        model = Model(81, 1, [2, 10, 50], [(4, 3), (4, 3), (4, 3)])
+        with tf.variable_scope("inputs"):
+            image, label = input.inputs("alignment.txt", "../data/")
+        layers_output, output, decoded, log_prob = model(image)
 
-    tf.summary.FileWriter('../log/unit_test/model/', sess.graph)
-    sess.run(init_op)
-    coord = tf.train.Coordinator()
-    threads = tf.train.start_queue_runners(sess=sess, coord=coord)
-    # sess.run([a, b])
-    print(sess.run(layers_output[-1]))
+        init_op = tf.global_variables_initializer()
 
-    coord.request_stop()
-    coord.join(threads)
+        tf.summary.FileWriter('../log/unit_test/model/', sess.graph)
+        sess.run(init_op)
+        coord = tf.train.Coordinator()
+        threads = tf.train.start_queue_runners(sess=sess, coord=coord)
+
+        print(sess.run(decoded))
+        print(sess.run(log_prob))
+
+        coord.request_stop()
+        coord.join(threads)
 
 
-# test()
+test()
