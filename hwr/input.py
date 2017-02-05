@@ -128,10 +128,18 @@ def read_images_and_labels_from_disk(input_queue):
 def create_lookup_table(d):
     """Create a tensorflow dictionary lookup"""
     keys, values = zip(*d.items())
-    keys = tf.constant(keys)
-    values = tf.constant(values, dtype=tf.int64)
-    table = tf.contrib.lookup.HashTable(
-        tf.contrib.lookup.KeyValueTensorInitializer(keys, values), -1)
+    if isinstance(keys[0], int):
+        keys = tf.constant(keys, dtype=tf.int64)
+    else:
+        keys = tf.constant(keys)
+    if isinstance(values[0], int):
+        values = tf.constant(values, dtype=tf.int64)
+        table = tf.contrib.lookup.HashTable(
+            tf.contrib.lookup.KeyValueTensorInitializer(keys, values), -1)
+    else:
+        values = tf.constant(values)
+        table = tf.contrib.lookup.HashTable(
+            tf.contrib.lookup.KeyValueTensorInitializer(keys, values), "UNK")
     return table
 
 
@@ -200,4 +208,4 @@ def test():
     test_inputs()
 
 
-test()
+# test()
