@@ -16,6 +16,7 @@ class GridLSTM4DLayer():
         top-right -> bottom-left
         bottom-left -> top-right
     """
+
     def __init__(self,
                  input_size,
                  output_size,
@@ -32,6 +33,7 @@ class GridLSTM4DLayer():
         self.output_size = output_size
         self.output_active_fn = output_active_fn \
             if output_active_fn is not None else tf.nn.relu
+
     def __call__(self,
                  input,
                  collapse=True,
@@ -73,7 +75,7 @@ class GridLSTM4DLayer():
 
         # build the computation graph
         with tf.variable_scope(scope or type(self).__name__):
-            
+
             # GridLSTMLayer scan from top-left to bottom-right
             with tf.variable_scope("top-left"):
                 input_top_left = input
@@ -97,7 +99,7 @@ class GridLSTM4DLayer():
                     input_bottom_left, initializer)
                 output_bottom_left = tf.reverse(
                     output_bottom_left, [True, False, False, False])
-            
+
             # GridLSTMLayer scan from bottom-right to top-left
             with tf.variable_scope("bottom-right"):
                 input_bottom_right = tf.reverse(
@@ -121,6 +123,7 @@ class GridLSTM4DLayer():
                                    output_bottom_right])
 
         return output
+
 
 class GridLSTMLayer():
     """2D Grid LSTM layer scan from top-left to bottom-left
@@ -435,11 +438,11 @@ def test_4Dlayer():
     t = time.time()
     result = sess.run(output, feed_dict={input_h: input})
     print("forward computation time:" + str(time.time() - t))
-    print("output shape:"+str(result.shape))
+    print("output shape:" + str(result.shape))
 
 
 def test():
     test_4Dlayer()
 
 
-test()
+# test()
